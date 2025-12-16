@@ -54,5 +54,19 @@ impl Database {
             sequences,
         })
     }
+    pub fn len(&self) -> usize {
+        self.ids.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty()
+    }
+    pub fn get(&self, index: usize) -> Option<(&str, &[u8])> {
+        if index < self.ids.len() {
+            Some((&self.ids[index], &self.sequences[index]))
+        } else {
+            None
+        }
+    }
 }
 

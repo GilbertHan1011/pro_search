@@ -1,1 +1,68 @@
 use rustc_hash::FxHashMap;
+use crate::core::database::Database;
+use crate::core::alphabet::encode_kmer;
+
+pub type ProteinId = u32;
+pub type Position = u16;
+
+pub struct KmerIndex {
+    map: FxHashMap<u64, Vec<(ProteinId, Position)>>,
+    pub k: usize,
+}
+
+impl KmerIndex {
+    pub fn new(k: usize) -> Self {
+        Self {
+            map: FxHashMap::default(),
+            k,
+        }
+    }
+    pub fn build(db: &Database, k: usize) -> Self {
+        let total_len: usize = db.sequences.iter().map(|s| s.len()).sum();
+        let mut map: FxHashMap<u64, Vec<(ProteinId, Position)>> = FxHashMap::with_capacity_and_hasher(total_len, Default::default());
+        println!("Building index with k={} for {} proteins...", k, db.len());
+        for (prot_id, seq) in db.sequences.iter().enumerate() {
+            let pid = prot_id as ProteinId;
+            if seq.len() < k {
+                continue;
+            }
+            for (pos, window) in seq.windows(k).enumerate() {
+                if let Some(encoded) = encode_kmer(window) {
+                    map.entry(encoded)
+                    .or_default()
+                    .push((pid, pos as Position));
+                }
+            }
+        }
+        println!("Index built! Total unique k-mers: {}", map.len());
+
+        KmerIndex { map, k }
+
+    }
+    pub fn query(&self, encoded_kmer: u64) -> Option<&Vec<(ProteinId, Position)>> {
+        self.map.get(&encoded_kmer)
+    }
+
+    pub fn search_basic(&self, query_seq: &[u8], top_n: usize) -> Vec<(ProteinId, u32)> {
+        let mut scores: FxHashMap<ProteinId, u32> = FxHashMap::default();
+        if query_seq.len() >= self.k {
+            for window in query_seq.windows(self.k) {
+                if let Some(encoded) = encode_kmer(window) {
+                    if let Some(hits) = self.map.get(&encoded) {
+                        for &(pid, _pos) in hits {
+                            *scores.entry(pid).or_insert(0) += 1;
+                        }
+                    }
+                }
+            }
+        }
+        let mut candidates: Vec<(ProteinId, u32)> = scores.into_iter().collect();
+        candidates.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+        if candidates.len() > top_n {
+            candidates.truncate(top_n);
+        }
+        candidates
+
+    }
+    
+}
