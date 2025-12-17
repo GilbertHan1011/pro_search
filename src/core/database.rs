@@ -1,7 +1,10 @@
 use std::fs::File;
-use std::io::{self, BufRead, BufReader};
+use std::io::{BufRead, BufReader,Read};
 use std::path::Path;
 use anyhow::{Context, Result};
+
+use flate2::read::GzDecoder; // gzip decoder
+use zstd::stream::read::Decoder as ZstdDecoder; // zstd decoder
 
 pub struct Database {
     pub ids: Vec<String>,
@@ -13,8 +16,20 @@ impl Database {
         let path = path.as_ref();
         let file = File::open(path)
             .with_context(|| format!("Failed to open file: {:?}", path))?;
-        let reader = BufReader::new(file);
-
+        let reader :Box<dyn Read> = match path.extension().and_then(|s| s.to_str()){
+            Some("gz") => {
+                println!("Detected gzip file");
+                Box::new(GzDecoder::new(file))
+            }
+            Some("zst") => {
+                println!("Detected zstd file");
+                Box::new(ZstdDecoder::new(file)?)
+            }
+            _ => {
+                Box::new(BufReader::new(file))
+            }
+        };
+        let reader = BufReader::new(reader);
         let mut ids = Vec::new();
         let mut sequences = Vec::new();
 

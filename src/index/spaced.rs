@@ -1,6 +1,6 @@
 use rustc_hash::FxHashMap;
 use crate::core::database::Database;
-use crate::core::alphabet::{encode_spaced, AA_TO_INT};
+use crate::core::alphabet::{encode_spaced};
 use crate::index::kmer::{ProteinId, Position};
 
 

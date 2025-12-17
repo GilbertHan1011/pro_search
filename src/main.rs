@@ -37,6 +37,8 @@ enum Commands {
     Bench {
         #[arg(value_enum)] // Takes the enum as a required positional argument
         task: BenchTask,
+        #[arg(short, long, default_value_t = 10)]
+        n: usize,
     }
 }
 
@@ -111,10 +113,9 @@ fn main() {
 
             println!("Running search for {} queries (Mode: {:?}, k={})...", queries.len(), mode, k);
             
-            // 根据模式构建索引 (只需构建一次)
             let start_idx = Instant::now();
             let index = KmerIndex::build(&db, k); // Basic/Diag/Auto 需要普通索引
-            // 注意：如果是 Spaced 模式，我们需要另外构建 SpacedIndex
+            //  SpacedIndex
             let spaced_index = if mode == SearchMode::Spaced {
                 Some(spaced::SpacedIndex::build(&db, "1101011"))
             } else {
@@ -152,7 +153,7 @@ fn main() {
                         for cand in candidates.iter().take(50) { // 只看 Top 50
                             let (_, t_seq) = db.get(cand.id as usize).unwrap();
                             let t_start = (cand.best_diagonal).max(0) as usize; 
-                            let ext = ungapped::extend_ungapped(&q_seq, t_seq,  &scoring,0, t_start, k, 10);
+                            let ext = ungapped::extend_ungapped(&q_seq, t_seq,  &scoring,0, t_start,  10);
                             ungapped_hits.push((cand.id, ext));
                         }
                         
@@ -188,17 +189,17 @@ fn main() {
         }
 
         // --- Benchmark commands ---
-        Commands::Bench { task } => {
+        Commands::Bench { task, n } => {
             match task {
-                BenchTask::K => experiment::run_k_tradeoff(&db),
-                BenchTask::Filter => experiment::run_filter_comparison(&db),
+                BenchTask::K => experiment::run_k_tradeoff(&db, n),
+                BenchTask::Filter => experiment::run_filter_comparison(&db, n),
                 BenchTask::Indel => experiment::run_indel_test(&db),
-                BenchTask::Spaced => experiment::run_spaced_seed_test(&db),
+                BenchTask::Spaced => experiment::run_spaced_seed_test(&db, n),
                 BenchTask::All => {
-                    experiment::run_k_tradeoff(&db);
-                    experiment::run_filter_comparison(&db);
+                    experiment::run_k_tradeoff(&db, n);
+                    experiment::run_filter_comparison(&db, n);
                     experiment::run_indel_test(&db);
-                    experiment::run_spaced_seed_test(&db);
+                    experiment::run_spaced_seed_test(&db, n);
                 }
             }
         }

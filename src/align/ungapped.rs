@@ -71,17 +71,16 @@ pub fn extend_ungapped(
     scoring: &Scoring,
     q_start: usize,
     t_start: usize,
-    k : usize,
     x_drop: i32,
 ) -> ExtensionResult {
     let (right_score, right_q_end, right_t_end) = extend_direction(query, target, 
         scoring, q_start, 
         t_start, 1, 
         x_drop);
-    let (left_score, left_q_start, left_t_start) = if (q_start > 0 && t_start > 0) {
+    let (left_score, left_q_start, left_t_start) = if q_start > 0 && t_start > 0 {
         extend_direction(query, target, 
-        scoring, q_start, 
-        t_start, -1, 
+        scoring, q_start -1,  // avoid double counting
+        t_start -1, -1, 
         x_drop)
     } else {
         (0, q_start, t_start)

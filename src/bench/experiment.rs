@@ -33,7 +33,7 @@ fn print_comparison(title: &str, baseline: &BenchmarkResult, refined: &Benchmark
     println!(">> MRR Improvement: {:.2}%", mrr_gain);
 }
 
-pub fn run_k_tradeoff(db: &Database) {
+pub fn run_k_tradeoff(db: &Database,top_n: usize) {
     println!("\n=== Task 1: K-mer Trade-off Analysis ===");
 
     let config = QueryConfig { length: 60, sub_rate: 0.10, indel_rate: 0.0 };
@@ -50,7 +50,7 @@ pub fn run_k_tradeoff(db: &Database) {
         let mut candidates_list = Vec::new();
         
         for q in &queries {
-            let hits = index.search_basic(&q.sequence, 10);
+            let hits = index.search_basic(&q.sequence, top_n);
             candidates_list.push(hits);
         }
         let total_time = start_search.elapsed().as_millis() as f64;
@@ -69,7 +69,7 @@ pub fn run_k_tradeoff(db: &Database) {
     }
 }
 
-pub fn run_filter_comparison(db: &Database) {
+pub fn run_filter_comparison(db: &Database,top_n: usize) {
     println!("\n=== Task 2: Diagonal Filtering vs Voting (k=5) ===");
     
     let config = QueryConfig { length: 60, sub_rate: 0.20, indel_rate: 0.0 };
@@ -81,7 +81,7 @@ pub fn run_filter_comparison(db: &Database) {
 
     let start_a = Instant::now();
     let res_a: Vec<Vec<(ProteinId, u32)>> = queries.iter()
-        .map(|q| index.search_basic(&q.sequence, 10))
+        .map(|q| index.search_basic(&q.sequence, top_n))
         .collect();
     let metrics_a = metric::calculate_metrics(&res_a, &truths, start_a.elapsed().as_millis() as f64);
     
@@ -109,10 +109,10 @@ pub fn run_filter_comparison(db: &Database) {
     }.print();
 }
 
-pub fn run_spaced_seed_test(db: &Database) {
+pub fn run_spaced_seed_test(db: &Database, top_n: usize) {
     println!("\n=== Task 4: Spaced Seeds vs Contiguous (High Mutation) ===");
     
-    // 极高难度：30% 突变率
+    // 30% mutation rate
     let config = QueryConfig { length: 60, sub_rate: 0.30, indel_rate: 0.0 };
     let queries = query_gen::sample_queries(db, 200, &config); // 跑多一点样本
     let truths: Vec<ProteinId> = queries.iter().map(|q| q.original_pid).collect();
@@ -127,7 +127,7 @@ pub fn run_spaced_seed_test(db: &Database) {
     // --- Run Contiguous ---
     let start_1 = Instant::now();
     let res_1: Vec<Vec<(ProteinId, u32)>> = queries.iter()
-        .map(|q| index_k5.search_basic(&q.sequence, 10))
+        .map(|q| index_k5.search_basic(&q.sequence, top_n))
         .collect();
     let m1 = metric::calculate_metrics(&res_1, &truths, start_1.elapsed().as_millis() as f64);
     
@@ -142,7 +142,7 @@ pub fn run_spaced_seed_test(db: &Database) {
     // --- Run Spaced ---
     let start_2 = Instant::now();
     let res_2: Vec<Vec<(ProteinId, u32)>> = queries.iter()
-        .map(|q| index_spaced.search_basic(&q.sequence, 10))
+        .map(|q| index_spaced.search_basic(&q.sequence, top_n))
         .collect();
     let m2 = metric::calculate_metrics(&res_2, &truths, start_2.elapsed().as_millis() as f64);
 
@@ -188,7 +188,7 @@ pub fn run_indel_test(db: &Database) {
 
             let ext = ungapped::extend_ungapped(
                 &q.sequence, &target_seq, &scoring,
-                q_start, t_start, k, 10
+                q_start, t_start,  10
             );
             ungapped_hits.push((cand.id, ext));
         }
