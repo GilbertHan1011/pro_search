@@ -6,7 +6,7 @@ pub type ProteinId = u32;
 pub type Position = u16;
 
 pub struct KmerIndex {
-    map: FxHashMap<u64, Vec<(ProteinId, Position)>>,
+    pub map: FxHashMap<u64, Vec<(ProteinId, Position)>>, // pub for test purpose
     pub k: usize,
 }
 
