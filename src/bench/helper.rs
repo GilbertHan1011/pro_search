@@ -1,4 +1,7 @@
 //Helper function like printing and wrapper
+use std::fs::File;
+use std::io::{self, Write, BufWriter};
+use std::path::Path;
 use crate::bench::metric::{BenchmarkResult,calculate_metrics};
 use crate::core::database::Database;
 use crate::bench::query_gen::sample_queries;
@@ -16,6 +19,20 @@ pub fn print_comparison(title: &str, baseline: &BenchmarkResult, refined: &Bench
     
     let mrr_gain = (refined.mrr - baseline.mrr) / baseline.mrr * 100.0;
     println!(">> MRR Improvement: {:.2}%", mrr_gain);
+}
+
+fn create_csv_writer(path: Option<&Path>) -> Option<BufWriter<File>> {
+    if let Some(p) = path {
+        match File::create(p) {
+            Ok(f) => Some(BufWriter::new(f)),
+            Err(e) => {
+                eprintln!("⚠️ Warning: Could not create CSV file {:?}: {}", p, e);
+                None
+            }
+        }
+    } else {
+        None
+    }
 }
 
 pub fn run_gapped_wrapper(

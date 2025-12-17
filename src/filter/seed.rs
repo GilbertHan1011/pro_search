@@ -1,7 +1,7 @@
 use rustc_hash::FxHashMap;
-use crate::index::kmer::KmerIndex;
-use crate::index::kmer::{ProteinId};
+use crate::index::kmer::{ProteinId,KmerIndex};
 use crate::core::alphabet::encode_kmer;
+use smallvec::SmallVec;
 
 #[derive(Debug, Clone)]
 pub struct Candidate {
@@ -10,12 +10,14 @@ pub struct Candidate {
     pub best_diagonal: i32,
 }
 
+type HitList = SmallVec<[i32; 8]>;
+
 pub fn find_candidate(
     kmer_index: &KmerIndex, 
     query_seq: &[u8],
     min_diagonal: usize
 ) -> Vec<Candidate>{
-    let mut protein_hit : FxHashMap<ProteinId,Vec<i32>> = FxHashMap::default();
+    let mut protein_hit : FxHashMap<ProteinId,HitList> = FxHashMap::default();
 
     // 1. Sliding windows and query
     if query_seq.len() > kmer_index.k {
@@ -30,11 +32,12 @@ pub fn find_candidate(
             }
         }
     }
-
-
     // 2. Calculate scores and best diagonals
     let mut candidate = Vec::new();
     for (pid, mut diagonals) in protein_hit {
+        if diagonals.len() < min_diagonal {
+            continue;
+        }
         diagonals.sort_unstable();
         let mut max_diagonal = 0;
         let mut max_hit = 0;

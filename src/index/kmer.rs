@@ -1,13 +1,15 @@
 use rustc_hash::FxHashMap;
 use crate::core::database::Database;
 use crate::core::alphabet::encode_kmer;
+use smallvec::SmallVec;
 use std::mem;
 
 pub type ProteinId = u32;
 pub type Position = u16;
 
+pub type PostingsList = SmallVec<[(ProteinId, Position); 2]>;
 pub struct KmerIndex {
-    pub map: FxHashMap<u64, Vec<(ProteinId, Position)>>, // pub for test purpose
+    pub map: FxHashMap<u64,PostingsList>, // pub for test purpose
     pub k: usize,
 }
 
@@ -19,8 +21,8 @@ impl KmerIndex {
         }
     }
     pub fn build(db: &Database, k: usize) -> Self {
-        let total_len: usize = db.sequences.iter().map(|s| s.len()).sum();
-        let mut map: FxHashMap<u64, Vec<(ProteinId, Position)>> = FxHashMap::with_capacity_and_hasher(total_len, Default::default());
+        let estimated_capacity = db.sequences.len() * 100;
+        let mut map: FxHashMap<u64, PostingsList> = FxHashMap::with_capacity_and_hasher(estimated_capacity, Default::default());
         println!("Building index with k={} for {} proteins...", k, db.len());
         for (prot_id, seq) in db.sequences.iter().enumerate() {
             let pid = prot_id as ProteinId;
@@ -39,7 +41,7 @@ impl KmerIndex {
         KmerIndex { map, k }
 
     }
-    pub fn query(&self, encoded_kmer: u64) -> Option<&Vec<(ProteinId, Position)>> {
+    pub fn query(&self, encoded_kmer: u64) -> Option<&PostingsList> {
         self.map.get(&encoded_kmer)
     }
 
@@ -73,13 +75,16 @@ impl KmerIndex {
         // Key size
         total_bytes += map_cap * mem::size_of::<u64>();
         // Value size
-        total_bytes += map_cap * mem::size_of::<Vec<(ProteinId, Position)>>();
+        total_bytes += map_cap * mem::size_of::<PostingsList>();
         // Control Bytes
         total_bytes += map_cap * 1; 
         // 3. Payload Deep Size
         let item_size = mem::size_of::<(ProteinId, Position)>();
+        
         for postings in self.map.values() {
-            total_bytes += postings.capacity() * item_size;
+            if postings.spilled() {
+                total_bytes += postings.capacity() * item_size;
+            }
         }
 
         total_bytes

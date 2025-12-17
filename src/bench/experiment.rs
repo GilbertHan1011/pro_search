@@ -22,6 +22,13 @@ impl ExpResult {
         println!("{:20} | R@1: {:.4} | R@10: {:.4} | MRR: {:.4} | Time: {:.4}ms | Cands: {:.1}", 
                 self.name, self.recall_1, self.recall_10, self.mrr, self.avg_time, self.candidates);
     }
+    fn csv_header() -> &'static str {
+        "Name,Recall_1,Recall_10,MRR,Avg_Time_ms,Avg_Candidates"
+    }
+    fn to_csv_line(&self) -> String {
+        format!("{},{:.6},{:.6},{:.6},{:.6},{:.2}\n", 
+                self.name, self.recall_1, self.recall_10, self.mrr, self.avg_time, self.candidates)
+    }
 }
 
 
