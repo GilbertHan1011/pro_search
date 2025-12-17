@@ -39,6 +39,20 @@ enum Commands {
         task: BenchTask,
         #[arg(short, long, default_value_t = 10)]
         n: usize,
+        #[arg(short, long, default_value_t = 6)]
+        k: usize,
+        #[arg(short, long)]
+        mutate: bool,
+        #[arg(short, long, default_value_t = 60)]
+        length: usize,
+        #[arg(short, long, default_value_t = 0.1)]
+        sub_rate: f64,
+        #[arg(short, long, default_value_t = 0.0)]
+        indel_rate: f64,
+        #[arg(short, long, default_value_t = 2000)]
+        sample_num: usize,
+        #[arg(short, long, default_value_t = 10)]
+        x_drop:usize,
     }
 }
 
@@ -60,9 +74,13 @@ enum BenchTask {
     K,
     /// Task 2: Diagonal Filter vs Voting
     Filter,
-    /// Task 3 & 5: Indel Robustness
+    /// Task 3: Ungapped Extension
+    Ungap,
+    /// Task 4: Stress Test
+    Stress,
+    /// Task 5: SM
     Indel,
-    /// Task 4 & 6: Spaced Seeds
+    /// Task 6: Spaced Seeds
     Spaced,
     /// Run all benchmarks
     All,
@@ -143,21 +161,11 @@ fn main() {
                         hits
                     },
                     SearchMode::Auto => {
-                        // === BLAST-like  ===
-                        // 1. Seeding (Step 2)
                         let candidates = seed::find_candidate(&index, &q_seq, 2);
-                        
-                        // 2. Ungapped Extension (Step 3)
-                        let mut ungapped_hits = Vec::new();
                         let scoring = ungapped::Scoring::default();
-                        for cand in candidates.iter().take(50) { // 只看 Top 50
-                            let (_, t_seq) = db.get(cand.id as usize).unwrap();
-                            let t_start = (cand.best_diagonal).max(0) as usize; 
-                            let ext = ungapped::extend_ungapped(&q_seq, t_seq,  &scoring,0, t_start,  10);
-                            ungapped_hits.push((cand.id, ext));
-                        }
+                        let ungapped_hits = ungapped::refine_ungapped(&q_seq, &candidates, &db, &scoring, 10, n);
                         
-                        // 3. Smith-Waterman (Step 5)
+                        // Smith-Waterman Refinement
                         let mut final_hits = Vec::new();
                         for (id, ext) in ungapped_hits.into_iter().take(20) { // Top 20
                             let (_, t_full) = db.get(id as usize).unwrap();
@@ -189,17 +197,24 @@ fn main() {
         }
 
         // --- Benchmark commands ---
-        Commands::Bench { task, n } => {
+        Commands::Bench { 
+            task, n, k, 
+            mutate, length, sub_rate, 
+            indel_rate, sample_num, x_drop} => {
             match task {
-                BenchTask::K => experiment::run_k_tradeoff(&db, n),
-                BenchTask::Filter => experiment::run_filter_comparison(&db, n),
-                BenchTask::Indel => experiment::run_indel_test(&db),
+                BenchTask::K => experiment::run_k_tradeoff(&db, n, mutate, length, sub_rate, indel_rate, sample_num),
+                BenchTask::Filter => experiment::run_filter_comparison(&db, n, k,mutate, length, sub_rate, indel_rate, sample_num),
+                BenchTask::Ungap => experiment::run_ungapped_test(&db, sample_num, n, k, length, sub_rate, indel_rate, x_drop),
+                BenchTask::Indel => experiment::run_indel_test(&db, sample_num, n, k, length, sub_rate, indel_rate),
                 BenchTask::Spaced => experiment::run_spaced_seed_test(&db, n),
+                BenchTask::Stress => experiment::run_stress_all(&db, sample_num, n),
                 BenchTask::All => {
-                    experiment::run_k_tradeoff(&db, n);
-                    experiment::run_filter_comparison(&db, n);
-                    experiment::run_indel_test(&db);
+                    experiment::run_k_tradeoff(&db, n, mutate, length, sub_rate, indel_rate, sample_num);
+                    experiment::run_filter_comparison(&db, n, k, mutate, length, sub_rate, indel_rate, sample_num);
+                    experiment::run_ungapped_test(&db, sample_num, n, k, length, sub_rate, indel_rate, x_drop);
+                    experiment::run_indel_test(&db, sample_num, n, k, length, sub_rate, indel_rate);
                     experiment::run_spaced_seed_test(&db, n);
+                    experiment::run_stress_all(&db, sample_num, n);
                 }
             }
         }

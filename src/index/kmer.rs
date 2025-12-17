@@ -1,6 +1,7 @@
 use rustc_hash::FxHashMap;
 use crate::core::database::Database;
 use crate::core::alphabet::encode_kmer;
+use std::mem;
 
 pub type ProteinId = u32;
 pub type Position = u16;
@@ -35,7 +36,6 @@ impl KmerIndex {
             }
         }
         println!("Index built! Total unique k-mers: {}", map.len());
-
         KmerIndex { map, k }
 
     }
@@ -62,6 +62,27 @@ impl KmerIndex {
             candidates.truncate(top_n);
         }
         candidates
+    }
+    pub fn memory_usage(&self) -> usize {
+        let mut total_bytes = 0;
+
+        // 1. Stack
+        total_bytes += mem::size_of::<Self>();
+        // 2. HashMap skeleton size
+        let map_cap = self.map.capacity();
+        // Key size
+        total_bytes += map_cap * mem::size_of::<u64>();
+        // Value size
+        total_bytes += map_cap * mem::size_of::<Vec<(ProteinId, Position)>>();
+        // Control Bytes
+        total_bytes += map_cap * 1; 
+        // 3. Payload Deep Size
+        let item_size = mem::size_of::<(ProteinId, Position)>();
+        for postings in self.map.values() {
+            total_bytes += postings.capacity() * item_size;
+        }
+
+        total_bytes
     }
     
 }

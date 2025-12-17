@@ -3,14 +3,14 @@ use crate::core::database::Database;
 use crate::index::kmer::{KmerIndex, ProteinId};
 use crate::align::ungapped::{self, Scoring};
 use crate::bench::query_gen::{self, QueryConfig};
-use crate::bench::metric::{self, BenchmarkResult};
-
+use crate::bench::helper::{print_comparison, run_gapped_wrapper};
+use crate::bench::metric::calculate_metrics;
 use crate::filter::seed; // Step 2
 use crate::index::spaced::SpacedIndex; // Step 6
 use crate::align::smith_waterman; // Step 5
-
-struct ExpResult {
+pub struct ExpResult {
     name: String,
+    recall_1: f64,
     recall_10: f64,
     mrr: f64,
     avg_time: f64,
@@ -19,25 +19,20 @@ struct ExpResult {
 
 impl ExpResult {
     fn print(&self) {
-        println!("{:20} | R@10: {:.4} | MRR: {:.4} | Time: {:.4}ms | Cands: {:.1}", 
-                self.name, self.recall_10, self.mrr, self.avg_time, self.candidates);
+        println!("{:20} | R@1: {:.4} | R@10: {:.4} | MRR: {:.4} | Time: {:.4}ms | Cands: {:.1}", 
+                self.name, self.recall_1, self.recall_10, self.mrr, self.avg_time, self.candidates);
     }
 }
 
-fn print_comparison(title: &str, baseline: &BenchmarkResult, refined: &BenchmarkResult, label_base: &str, label_refined: &str) {
-    println!("\n=== {} ===", title);
-    println!("{:<20} | R@10: {:.4} | MRR: {:.4} | Time: {:.4}ms", label_base, baseline.recall_at_10, baseline.mrr, baseline.avg_time_ms);
-    println!("{:<20} | R@10: {:.4} | MRR: {:.4} | Time: {:.4}ms", label_refined, refined.recall_at_10, refined.mrr, refined.avg_time_ms);
-    
-    let mrr_gain = (refined.mrr - baseline.mrr) / baseline.mrr * 100.0;
-    println!(">> MRR Improvement: {:.2}%", mrr_gain);
-}
 
-pub fn run_k_tradeoff(db: &Database,top_n: usize) {
+pub fn run_k_tradeoff(db: &Database,top_n: usize, mutate: bool, length: usize, sub_rate: f64, indel_rate: f64,sample_num: usize) {
     println!("\n=== Task 1: K-mer Trade-off Analysis ===");
-
-    let config = QueryConfig { length: 60, sub_rate: 0.10, indel_rate: 0.0 };
-    let queries = query_gen::sample_queries(db, 100, &config);
+    let config = if mutate {
+        QueryConfig { length, sub_rate, indel_rate }
+    } else {
+        QueryConfig { length, sub_rate: 0.0, indel_rate: 0.0 }
+    };
+    let queries = query_gen::sample_queries(db, sample_num, &config);
     let truths: Vec<ProteinId> = queries.iter().map(|q| q.original_pid).collect();
 
     for k in 3..=7 {
@@ -55,10 +50,11 @@ pub fn run_k_tradeoff(db: &Database,top_n: usize) {
         }
         let total_time = start_search.elapsed().as_millis() as f64;
 
-        let metrics = metric::calculate_metrics(&candidates_list, &truths, total_time);
+        let metrics = calculate_metrics(&candidates_list, &truths, total_time);
         
         let res = ExpResult {
             name: format!("k={}", k),
+            recall_1: metrics.recall_at_1,
             recall_10: metrics.recall_at_10,
             mrr: metrics.mrr,
             avg_time: metrics.avg_time_ms,
@@ -69,24 +65,28 @@ pub fn run_k_tradeoff(db: &Database,top_n: usize) {
     }
 }
 
-pub fn run_filter_comparison(db: &Database,top_n: usize) {
-    println!("\n=== Task 2: Diagonal Filtering vs Voting (k=5) ===");
+pub fn run_filter_comparison(db: &Database,top_n: usize, k: usize, mutate: bool, length: usize, sub_rate: f64, indel_rate: f64,sample_num: usize) {
+    println!("\n=== Task 2: Diagonal Filtering vs Voting (k={}) ===", k);
     
-    let config = QueryConfig { length: 60, sub_rate: 0.20, indel_rate: 0.0 };
-    let queries = query_gen::sample_queries(db, 100, &config);
+    let config = if mutate {
+        QueryConfig { length, sub_rate, indel_rate }
+    } else {
+        QueryConfig { length, sub_rate: 0.0, indel_rate: 0.0 }
+    };
+    let queries = query_gen::sample_queries(db, sample_num, &config);
     let truths: Vec<ProteinId> = queries.iter().map(|q| q.original_pid).collect();
 
-    let k = 5;
     let index = KmerIndex::build(db, k);
 
     let start_a = Instant::now();
     let res_a: Vec<Vec<(ProteinId, u32)>> = queries.iter()
         .map(|q| index.search_basic(&q.sequence, top_n))
         .collect();
-    let metrics_a = metric::calculate_metrics(&res_a, &truths, start_a.elapsed().as_millis() as f64);
+    let metrics_a = calculate_metrics(&res_a, &truths, start_a.elapsed().as_millis() as f64);
     
     ExpResult {
         name: "Method A (Voting)".to_string(),
+        recall_1: metrics_a.recall_at_1,
         recall_10: metrics_a.recall_at_10,
         mrr: metrics_a.mrr,
         avg_time: metrics_a.avg_time_ms,
@@ -98,10 +98,11 @@ pub fn run_filter_comparison(db: &Database,top_n: usize) {
         let cands = seed::find_candidate(&index, &q.sequence, 2);
         cands.into_iter().take(10).map(|c| (c.id, c.score as u32)).collect()
     }).collect();
-    let metrics_b = metric::calculate_metrics(&res_b, &truths, start_b.elapsed().as_millis() as f64);
+    let metrics_b = calculate_metrics(&res_b, &truths, start_b.elapsed().as_millis() as f64);
 
     ExpResult {
         name: "Method B (Diag)".to_string(),
+        recall_1: metrics_b.recall_at_1,
         recall_10: metrics_b.recall_at_10,
         mrr: metrics_b.mrr,
         avg_time: metrics_b.avg_time_ms,
@@ -110,11 +111,11 @@ pub fn run_filter_comparison(db: &Database,top_n: usize) {
 }
 
 pub fn run_spaced_seed_test(db: &Database, top_n: usize) {
-    println!("\n=== Task 4: Spaced Seeds vs Contiguous (High Mutation) ===");
+    println!("\n=== Task 6: Spaced Seeds vs Contiguous (High Mutation) ===");
     
     // 30% mutation rate
     let config = QueryConfig { length: 60, sub_rate: 0.30, indel_rate: 0.0 };
-    let queries = query_gen::sample_queries(db, 200, &config); // 跑多一点样本
+    let queries = query_gen::sample_queries(db, 200, &config);
     let truths: Vec<ProteinId> = queries.iter().map(|q| q.original_pid).collect();
 
     // 1. Contiguous k=5 (Weight=5, Span=5)
@@ -129,10 +130,11 @@ pub fn run_spaced_seed_test(db: &Database, top_n: usize) {
     let res_1: Vec<Vec<(ProteinId, u32)>> = queries.iter()
         .map(|q| index_k5.search_basic(&q.sequence, top_n))
         .collect();
-    let m1 = metric::calculate_metrics(&res_1, &truths, start_1.elapsed().as_millis() as f64);
+    let m1 = calculate_metrics(&res_1, &truths, start_1.elapsed().as_millis() as f64);
     
     ExpResult {
         name: "Contiguous (11111)".to_string(),
+        recall_1: m1.recall_at_1,
         recall_10: m1.recall_at_10,
         mrr: m1.mrr,
         avg_time: m1.avg_time_ms,
@@ -144,10 +146,11 @@ pub fn run_spaced_seed_test(db: &Database, top_n: usize) {
     let res_2: Vec<Vec<(ProteinId, u32)>> = queries.iter()
         .map(|q| index_spaced.search_basic(&q.sequence, top_n))
         .collect();
-    let m2 = metric::calculate_metrics(&res_2, &truths, start_2.elapsed().as_millis() as f64);
+    let m2 = calculate_metrics(&res_2, &truths, start_2.elapsed().as_millis() as f64);
 
     ExpResult {
         name: "Spaced (1101011)".to_string(),
+        recall_1: m2.recall_at_1,
         recall_10: m2.recall_at_10,
         mrr: m2.mrr,
         avg_time: m2.avg_time_ms,
@@ -155,20 +158,43 @@ pub fn run_spaced_seed_test(db: &Database, top_n: usize) {
     }.print();
 }
 
+pub fn run_ungapped_test(
+    db: &Database, sample_num: usize, 
+    top_n: usize, k: usize, 
+    length: usize, sub_rate: f64, 
+    indel_rate: f64,x_drop: usize) {
+
+    println!("\n=== Task 3: Ungapped Extension ===");
+
+    let config_sub  = QueryConfig{length:length, sub_rate:sub_rate, indel_rate:0.0};
+    let config_indel = QueryConfig{length:length, sub_rate:0.0, indel_rate:indel_rate};
+    
+    let index = KmerIndex::build(db, k);
+    let scoring = Scoring::default();
+    let metrics_sub = run_gapped_wrapper(db,&index,top_n,sample_num,&config_sub,&scoring,x_drop as i32);
+    let metrics_indel = run_gapped_wrapper(db,&index,top_n,sample_num,&config_indel,&scoring,x_drop as i32);
+
+
+    print_comparison("Ungapped Extension", &metrics_sub, 
+    &metrics_indel, "Sub Only", "Indel only");
+}
+
 
 /// Task 3 / Step 5 Test: Indel Robustness & SW Refinement
-pub fn run_indel_test(db: &Database) {
-    println!("\nGenerating Indel Queries...");
+pub fn run_indel_test(
+    db: &Database, sample_num: usize, 
+    top_n: usize, k: usize, 
+    length: usize, sub_rate: f64, 
+    indel_rate: f64) {
+    println!("\n=== Task 3 & 5: Indel Robustness & SW Refinement ===");
 
-    let config = QueryConfig { length: 80, sub_rate: 0.05, indel_rate: 0.10 };
-    let queries = query_gen::sample_queries(db, 50, &config); // 跑 50 个样本
+    let config = QueryConfig { length, sub_rate, indel_rate };
+    let queries = query_gen::sample_queries(db, sample_num, &config);
     let truths: Vec<ProteinId> = queries.iter().map(|q| q.original_pid).collect();
 
-    let k = 5;
     let index = KmerIndex::build(db, k);
     let scoring = Scoring::default();
 
-    // 存储两种策略的结果
     let mut res_ungapped = Vec::new(); // Baseline
     let mut res_sw = Vec::new();       // Refined
 
@@ -224,10 +250,54 @@ pub fn run_indel_test(db: &Database) {
 
     let time_per_query = start_total.elapsed().as_millis() as f64 / 50.0;
 
-    let m_ungapped = metric::calculate_metrics(&res_ungapped, &truths, time_per_query);
-    let m_sw = metric::calculate_metrics(&res_sw, &truths, time_per_query); // 注意：这里时间其实是累加的
+    let m_ungapped = calculate_metrics(&res_ungapped, &truths, time_per_query);
+    let m_sw = calculate_metrics(&res_sw, &truths, time_per_query); 
 
     print_comparison("Step 5 Test: Indel Robustness (10% Indels)", &m_ungapped, &m_sw, "Ungapped Only", "Ungapped + SW");
 }
 
 
+pub fn run_stress_all(db: &Database, sample_num: usize, top_n: usize) {
+    println!("\n===============================================================");
+    println!("   STRESS TEST: K-mer Tradeoffs & Mutation Robustness");
+    println!("===============================================================");
+    println!("{:<4} | {:<8} | {:<8} | {:<8} | {:<8} | {:<8}| {:<8} | {:<10}", 
+            "K", "Mut_Rate", "R@1", "R@10", "MRR", "Time(ms)", "Cands", "Mem(MB)");
+    println!("---------------------------------------------------------------");
+
+    let k_values = vec![3, 4, 5, 6, 7, 8];
+    let mutation_rates = vec![0.0, 0.10, 0.20, 0.30];
+
+    for &sub_rate in &mutation_rates {
+        let config = QueryConfig { 
+            length: 60, 
+            sub_rate, 
+            indel_rate: 0.0 // Focus on Substitution
+        };
+        let queries = query_gen::sample_queries(db, sample_num, &config);
+        let truths: Vec<_> = queries.iter().map(|q| q.original_pid).collect();
+
+        for &k in &k_values {
+            let index = KmerIndex::build(db, k);
+            let mem_bytes = index.memory_usage();
+            let mem_mb = mem_bytes as f64 / 1024.0 / 1024.0;
+
+            let start_search = Instant::now();
+            let mut candidates_list = Vec::new();
+
+            for q in &queries {
+                // Use Step 2 (Diagonal Filter) or Step 1 (Basic)
+                let hits = index.search_basic(&q.sequence, top_n);
+                candidates_list.push(hits);
+            }
+            
+            let total_time = start_search.elapsed().as_millis() as f64;
+            
+            let m = calculate_metrics(&candidates_list, &truths, total_time);
+
+            println!("{:<4} | {:<8.1} | {:<8.4} | {:<8.4} | {:<8.4} | {:<8.1} | {:<10.2} | {:<10.2}", 
+                    k, sub_rate, m.recall_at_1, m.recall_at_10, m.mrr, m.avg_time_ms, m.avg_candidates, mem_mb);
+    }
+    println!("---------------------------------------------------------------");
+}
+}

@@ -26,9 +26,12 @@ pub fn sample_queries(db: &Database, num_queries: usize, config: &QueryConfig) -
         
         if seq.len() < config.length { continue; }
 
-        let start = rng.random_range(0..seq.len() - config.length);
+        let start = rng.random_range(0..=seq.len() - config.length);
         let original_slice = &seq[start..start + config.length];
-        let mutated_seq = mutate_sequence(original_slice, config.sub_rate, config.indel_rate, &mut rng);
+        let mutated_seq = mutate_sequence(
+            original_slice, config.sub_rate,
+                config.indel_rate, &mut rng
+            );
         
         queries.push(GroundTruthQuery {
             sequence: mutated_seq,
