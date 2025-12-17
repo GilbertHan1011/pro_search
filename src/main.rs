@@ -53,6 +53,8 @@ enum Commands {
         sample_num: usize,
         #[arg(short, long, default_value_t = 10)]
         x_drop:usize,
+        #[arg(short, long,default_value = "11010111")]
+        pattern: String,
     }
 }
 
@@ -175,7 +177,7 @@ fn main() {
                             let (q_sub, _) = smith_waterman::extract_window(&q_seq, q_center, 60);
                             let (t_sub, _) = smith_waterman::extract_window(t_full, t_center, 60);
                             
-                            let align = smith_waterman::align_sw(&q_sub, &t_sub, -10, -1);
+                            let align = smith_waterman::align_sw(&q_sub, &t_sub, -10, -1, 1, -1);
                             final_hits.push((id, align.score as u32));
                         }
                         
@@ -200,20 +202,20 @@ fn main() {
         Commands::Bench { 
             task, n, k, 
             mutate, length, sub_rate, 
-            indel_rate, sample_num, x_drop} => {
+            indel_rate, sample_num, x_drop, pattern} => {
             match task {
                 BenchTask::K => experiment::run_k_tradeoff(&db, n, mutate, length, sub_rate, indel_rate, sample_num),
                 BenchTask::Filter => experiment::run_filter_comparison(&db, n, k,mutate, length, sub_rate, indel_rate, sample_num),
                 BenchTask::Ungap => experiment::run_ungapped_test(&db, sample_num, n, k, length, sub_rate, indel_rate, x_drop),
-                BenchTask::Indel => experiment::run_indel_test(&db, sample_num, n, k, length, sub_rate, indel_rate),
-                BenchTask::Spaced => experiment::run_spaced_seed_test(&db, n),
+                BenchTask::Indel => experiment::run_indel_test(&db, sample_num, n, k, length, sub_rate, indel_rate, x_drop),
+                BenchTask::Spaced => experiment::run_spaced_seed_test(&db, n, k, &pattern, sample_num, sub_rate, indel_rate, length),
                 BenchTask::Stress => experiment::run_stress_all(&db, sample_num, n),
                 BenchTask::All => {
                     experiment::run_k_tradeoff(&db, n, mutate, length, sub_rate, indel_rate, sample_num);
                     experiment::run_filter_comparison(&db, n, k, mutate, length, sub_rate, indel_rate, sample_num);
                     experiment::run_ungapped_test(&db, sample_num, n, k, length, sub_rate, indel_rate, x_drop);
-                    experiment::run_indel_test(&db, sample_num, n, k, length, sub_rate, indel_rate);
-                    experiment::run_spaced_seed_test(&db, n);
+                    experiment::run_indel_test(&db, sample_num, n, k, length, sub_rate, indel_rate, x_drop);
+                    experiment::run_spaced_seed_test(&db, n, k, &pattern, sample_num, sub_rate, indel_rate, length);
                     experiment::run_stress_all(&db, sample_num, n);
                 }
             }

@@ -119,7 +119,7 @@ pub fn encode_spaced(seq: &[u8], mask: &[bool]) -> Option<u64> {
 pub fn decode_kmer(mut encoded: u64, k: usize) -> String {
     let mut chars = vec![0u8; k];
     for i in (0..k).rev() {
-        let val = (encoded & 0x1F) as usize; // 取最低 5 位
+        let val = (encoded & 0x1F) as usize; 
         if val < 20 {
             chars[i] = INT_TO_AA[val];
         } else {

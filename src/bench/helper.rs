@@ -31,7 +31,7 @@ pub fn run_gapped_wrapper(
     for q in &queries {
         let candidates = find_candidate(index, &q.sequence, 2);
 
-        // Step 3: Ungapped Extension (使用 wrapper)
+        // Step 3: Ungapped Extension 
         let refined_hits = refine_ungapped(
             &q.sequence, 
             &candidates, 
@@ -41,7 +41,6 @@ pub fn run_gapped_wrapper(
             top_n
         );
 
-        // 格式转换: Benchmark 需要 Vec<(id, u32)>
         let hits_formatted: Vec<(ProteinId, u32)> = refined_hits
             .into_iter()
             .map(|(id, ext)| (id, std::cmp::max(0, ext.score) as u32))

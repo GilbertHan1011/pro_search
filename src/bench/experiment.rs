@@ -1,7 +1,7 @@
 use std::time::Instant;
 use crate::core::database::Database;
 use crate::index::kmer::{KmerIndex, ProteinId};
-use crate::align::ungapped::{self, Scoring};
+use crate::align::ungapped::{Scoring, refine_ungapped};
 use crate::bench::query_gen::{self, QueryConfig};
 use crate::bench::helper::{print_comparison, run_gapped_wrapper};
 use crate::bench::metric::calculate_metrics;
@@ -110,54 +110,6 @@ pub fn run_filter_comparison(db: &Database,top_n: usize, k: usize, mutate: bool,
     }.print();
 }
 
-pub fn run_spaced_seed_test(db: &Database, top_n: usize) {
-    println!("\n=== Task 6: Spaced Seeds vs Contiguous (High Mutation) ===");
-    
-    // 30% mutation rate
-    let config = QueryConfig { length: 60, sub_rate: 0.30, indel_rate: 0.0 };
-    let queries = query_gen::sample_queries(db, 200, &config);
-    let truths: Vec<ProteinId> = queries.iter().map(|q| q.original_pid).collect();
-
-    // 1. Contiguous k=5 (Weight=5, Span=5)
-    let index_k5 = KmerIndex::build(db, 5);
-    
-    // 2. Spaced Pattern (Weight=5, Span=7)
-    // 1101011 -> Weight 5
-    let index_spaced = SpacedIndex::build(db, "1101011");
-
-    // --- Run Contiguous ---
-    let start_1 = Instant::now();
-    let res_1: Vec<Vec<(ProteinId, u32)>> = queries.iter()
-        .map(|q| index_k5.search_basic(&q.sequence, top_n))
-        .collect();
-    let m1 = calculate_metrics(&res_1, &truths, start_1.elapsed().as_millis() as f64);
-    
-    ExpResult {
-        name: "Contiguous (11111)".to_string(),
-        recall_1: m1.recall_at_1,
-        recall_10: m1.recall_at_10,
-        mrr: m1.mrr,
-        avg_time: m1.avg_time_ms,
-        candidates: m1.avg_candidates
-    }.print();
-
-    // --- Run Spaced ---
-    let start_2 = Instant::now();
-    let res_2: Vec<Vec<(ProteinId, u32)>> = queries.iter()
-        .map(|q| index_spaced.search_basic(&q.sequence, top_n))
-        .collect();
-    let m2 = calculate_metrics(&res_2, &truths, start_2.elapsed().as_millis() as f64);
-
-    ExpResult {
-        name: "Spaced (1101011)".to_string(),
-        recall_1: m2.recall_at_1,
-        recall_10: m2.recall_at_10,
-        mrr: m2.mrr,
-        avg_time: m2.avg_time_ms,
-        candidates: m2.avg_candidates
-    }.print();
-}
-
 pub fn run_ungapped_test(
     db: &Database, sample_num: usize, 
     top_n: usize, k: usize, 
@@ -177,83 +129,6 @@ pub fn run_ungapped_test(
 
     print_comparison("Ungapped Extension", &metrics_sub, 
     &metrics_indel, "Sub Only", "Indel only");
-}
-
-
-/// Task 3 / Step 5 Test: Indel Robustness & SW Refinement
-pub fn run_indel_test(
-    db: &Database, sample_num: usize, 
-    top_n: usize, k: usize, 
-    length: usize, sub_rate: f64, 
-    indel_rate: f64) {
-    println!("\n=== Task 3 & 5: Indel Robustness & SW Refinement ===");
-
-    let config = QueryConfig { length, sub_rate, indel_rate };
-    let queries = query_gen::sample_queries(db, sample_num, &config);
-    let truths: Vec<ProteinId> = queries.iter().map(|q| q.original_pid).collect();
-
-    let index = KmerIndex::build(db, k);
-    let scoring = Scoring::default();
-
-    let mut res_ungapped = Vec::new(); // Baseline
-    let mut res_sw = Vec::new();       // Refined
-
-    let start_total = Instant::now();
-
-    for q in &queries {
-        // --- Step 2: Seeding ---
-        let candidates = seed::find_candidate(&index, &q.sequence, 2);
-        
-        // --- Step 3: Ungapped Extension (Baseline) ---
-        let mut ungapped_hits = Vec::new();
-        for cand in candidates.iter().take(50) {
-            let (_, target_seq) = db.get(cand.id as usize).unwrap();
-
-            let q_start = 0; 
-            let t_start = (cand.best_diagonal + 0).max(0) as usize; 
-
-            let ext = ungapped::extend_ungapped(
-                &q.sequence, &target_seq, &scoring,
-                q_start, t_start,  10
-            );
-            ungapped_hits.push((cand.id, ext));
-        }
-        
-        ungapped_hits.sort_by(|a, b| b.1.score.cmp(&a.1.score));
-        
-        res_ungapped.push(ungapped_hits.iter().map(|(id, ext)| (*id, ext.score as u32)).collect());
-
-        // --- Step 5: Smith-Waterman Refinement (Advanced) ---
-        let mut sw_hits = Vec::new();
-        let window_radius = 50;
-
-        for (id, ext) in ungapped_hits.iter().take(20) {
-            let (_, target_full) = db.get(*id as usize).unwrap();
-
-            let q_center = (ext.q_start + ext.q_end) / 2;
-            let t_center = (ext.t_start + ext.t_end) / 2;
-            
-            // extract_window
-            let (q_sub, _) = smith_waterman::extract_window(&q.sequence, q_center, window_radius);
-            let (t_sub, _) = smith_waterman::extract_window(target_full, t_center, window_radius);
-
-            // 2. Smith-Waterman
-            // Gap Open = -10, Gap Extend = -1
-            let align = smith_waterman::align_sw(&q_sub, &t_sub, -10, -1);
-            
-            sw_hits.push((*id, align.score));
-        }
-
-        sw_hits.sort_by(|a, b| b.1.cmp(&a.1));
-        res_sw.push(sw_hits.into_iter().map(|(id, s)| (id, s as u32)).collect());
-    }
-
-    let time_per_query = start_total.elapsed().as_millis() as f64 / 50.0;
-
-    let m_ungapped = calculate_metrics(&res_ungapped, &truths, time_per_query);
-    let m_sw = calculate_metrics(&res_sw, &truths, time_per_query); 
-
-    print_comparison("Step 5 Test: Indel Robustness (10% Indels)", &m_ungapped, &m_sw, "Ungapped Only", "Ungapped + SW");
 }
 
 
@@ -300,4 +175,123 @@ pub fn run_stress_all(db: &Database, sample_num: usize, top_n: usize) {
     }
     println!("---------------------------------------------------------------");
 }
+}
+
+
+/// Task 5 : Indel Robustness & SW Refinement
+pub fn run_indel_test(
+    db: &Database, sample_num: usize, 
+    top_n: usize, k: usize, 
+    length: usize, sub_rate: f64, 
+    indel_rate: f64, x_drop: usize) {
+    println!("\n=== Task 5: Indel Robustness & SW Refinement ===");
+
+    let config = QueryConfig { length, sub_rate, indel_rate };
+    let queries = query_gen::sample_queries(db, sample_num, &config);
+    let truths: Vec<ProteinId> = queries.iter().map(|q| q.original_pid).collect();
+
+    let index = KmerIndex::build(db, k);
+    let scoring = Scoring::default();
+
+    let mut res_ungapped = Vec::new(); // Baseline
+    let mut res_sw = Vec::new();       // Refined
+
+    let start_total = Instant::now();
+
+    for q in &queries {
+        // --- Step 2: Seeding ---
+        let candidates = seed::find_candidate(&index, &q.sequence, 2);
+        // --- Step 3: Ungapped Extension (Baseline) ---
+        let ungapped_hits = refine_ungapped(&q.sequence, &candidates, db, &scoring, x_drop as i32, top_n);
+
+        res_ungapped.push(ungapped_hits.iter().map(|(id, ext)| (*id, ext.score as u32)).collect());
+
+        // --- Step 5: Smith-Waterman Refinement (Advanced) ---
+        let mut sw_hits = Vec::new();
+        let window_radius = 80;
+
+        for (id, ext) in ungapped_hits.iter() {
+            let (_, target_full) = db.get(*id as usize).unwrap();
+
+            let q_center = (ext.q_start + ext.q_end) / 2;
+            let t_center = (ext.t_start + ext.t_end) / 2;
+            
+            // extract_window
+            let (q_sub, _) = smith_waterman::extract_window(&q.sequence, q_center, window_radius);
+            let (t_sub, _) = smith_waterman::extract_window(target_full, t_center, window_radius);
+
+            // 2. Smith-Waterman
+            // Gap Open = -10, Gap Extend = -1
+            let align = smith_waterman::align_sw(&q_sub, &t_sub, -10, -1, 1, -1);
+            
+            sw_hits.push((*id, align.score));
+        }
+
+        sw_hits.sort_by(|a, b| b.1.cmp(&a.1));
+        res_sw.push(sw_hits.into_iter().map(|(id, s)| (id, s as u32)).collect());
+    }
+
+    let time_per_query = start_total.elapsed().as_millis() as f64 / 50.0;
+
+    let m_ungapped = calculate_metrics(&res_ungapped, &truths, time_per_query);
+    let m_sw = calculate_metrics(&res_sw, &truths, time_per_query); 
+
+    print_comparison("Step 5 Test: Indel Robustness (10% Indels)", &m_ungapped, &m_sw, "Ungapped Only", "Ungapped + SW");
+}
+
+
+pub fn run_spaced_seed_test(
+    db: &Database, top_n: usize,
+    k: usize,pattern: &str,sample_num: usize, 
+    sub_rate: f64, indel_rate: f64,length: usize
+) {
+    println!("\n=== Task 6: Spaced Seeds vs Contiguous (High Mutation) ===");
+    
+    // 30% mutation rate
+    let config = QueryConfig { length: length, sub_rate: sub_rate, indel_rate: indel_rate };
+    let queries = query_gen::sample_queries(db, sample_num, &config);
+    let truths: Vec<ProteinId> = queries.iter().map(|q| q.original_pid).collect();
+
+    // 1. Contiguous k=5 (Weight=5, Span=5)
+    let index_k5 = KmerIndex::build(db, k);
+    
+    // 2. Spaced Pattern (Weight=5, Span=7)
+    // 1101011 -> Weight 5
+    let index_spaced = SpacedIndex::build(db, pattern);
+
+    if index_spaced.weight != k {
+        panic!("Spaced index weight does not match k");
+    }
+
+    // --- Run Contiguous ---
+    let start_1 = Instant::now();
+    let res_1: Vec<Vec<(ProteinId, u32)>> = queries.iter()
+        .map(|q| index_k5.search_basic(&q.sequence, top_n))
+        .collect();
+    let m1 = calculate_metrics(&res_1, &truths, start_1.elapsed().as_millis() as f64);
+    
+    ExpResult {
+        name: "Contiguous (11111)".to_string(),
+        recall_1: m1.recall_at_1,
+        recall_10: m1.recall_at_10,
+        mrr: m1.mrr,
+        avg_time: m1.avg_time_ms,
+        candidates: m1.avg_candidates
+    }.print();
+
+    // --- Run Spaced ---
+    let start_2 = Instant::now();
+    let res_2: Vec<Vec<(ProteinId, u32)>> = queries.iter()
+        .map(|q| index_spaced.search_basic(&q.sequence, top_n))
+        .collect();
+    let m2 = calculate_metrics(&res_2, &truths, start_2.elapsed().as_millis() as f64);
+
+    ExpResult {
+        name: "Spaced (1101011)".to_string(),
+        recall_1: m2.recall_at_1,
+        recall_10: m2.recall_at_10,
+        mrr: m2.mrr,
+        avg_time: m2.avg_time_ms,
+        candidates: m2.avg_candidates
+    }.print();
 }

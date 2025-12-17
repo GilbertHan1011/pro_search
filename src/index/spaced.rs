@@ -59,6 +59,4 @@ impl SpacedIndex {
         }
         candidates
     }
-    
-        
 }

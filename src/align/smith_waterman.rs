@@ -5,9 +5,14 @@ pub fn align_sw(
     query: &[u8], 
     target: &[u8], 
     gap_open: i32, 
-    gap_extend: i32
+    gap_extend: i32,
+    match_score: i32,
+    mismatch_score: i32
 ) -> Alignment {
-    let scoring = Scoring::from_scores(5, -4, gap_open, gap_extend);
+    let scoring = Scoring::from_scores(
+        gap_open, gap_extend, 
+        match_score, mismatch_score
+    );
 
     let mut aligner = pairwise::Aligner::with_scoring(scoring);
 
