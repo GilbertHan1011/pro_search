@@ -1,7 +1,6 @@
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::Path;
-use std::thread::current;
 use anyhow::{Context, Result};
 
 pub struct Database {

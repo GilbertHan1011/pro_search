@@ -100,6 +100,21 @@ pub fn encode_kmer(seq: &[u8]) -> Option<u64> {
     Some(encoded)
 }
 
+pub fn encode_spaced(seq: &[u8], mask: &[bool]) -> Option<u64> {
+    let mut encoded: u64 = 0;
+    for (i, &mask_bit) in mask.iter().enumerate() {
+        if mask_bit{
+            let val = AA_TO_INT[seq[i] as usize];
+            if val == INVALID_AA {
+                return None;
+            }
+            encoded = (encoded << 5) | (val as u64);
+        }
+    }
+    Some(encoded)
+    
+}
+
 // For Debug purpose
 pub fn decode_kmer(mut encoded: u64, k: usize) -> String {
     let mut chars = vec![0u8; k];

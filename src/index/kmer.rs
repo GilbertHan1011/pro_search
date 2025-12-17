@@ -62,7 +62,6 @@ impl KmerIndex {
             candidates.truncate(top_n);
         }
         candidates
-
     }
     
 }
