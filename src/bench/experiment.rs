@@ -3,11 +3,13 @@ use crate::core::database::Database;
 use crate::index::kmer::{KmerIndex, ProteinId};
 use crate::align::ungapped::{Scoring, refine_ungapped};
 use crate::bench::query_gen::{self, QueryConfig};
-use crate::bench::helper::{print_comparison, run_gapped_wrapper};
+use crate::bench::helper::{print_comparison, run_gapped_wrapper,create_csv_writer,write_metric_csv};
 use crate::bench::metric::calculate_metrics;
 use crate::filter::seed; // Step 2
 use crate::index::spaced::SpacedIndex; // Step 6
 use crate::align::smith_waterman; // Step 5
+use std::path::Path;
+use std::io::Write;
 pub struct ExpResult {
     name: String,
     recall_1: f64,
@@ -32,8 +34,17 @@ impl ExpResult {
 }
 
 
-pub fn run_k_tradeoff(db: &Database,top_n: usize, mutate: bool, length: usize, sub_rate: f64, indel_rate: f64,sample_num: usize) {
+pub fn run_k_tradeoff(
+    db: &Database,top_n: usize, mutate: bool, 
+    length: usize, sub_rate: f64, 
+    indel_rate: f64,sample_num: usize,
+    csv_path: Option<&Path>
+) {
     println!("\n=== Task 1: K-mer Trade-off Analysis ===");
+    let mut csv_writer = create_csv_writer(csv_path);
+    if let Some(w) = &mut csv_writer {
+        writeln!(w, "{}", ExpResult::csv_header()).unwrap();
+    }
     let config = if mutate {
         QueryConfig { length, sub_rate, indel_rate }
     } else {
@@ -69,12 +80,22 @@ pub fn run_k_tradeoff(db: &Database,top_n: usize, mutate: bool, length: usize, s
         };
         res.print();
         println!("   (Index Build Time: {} ms, Size: {} k-mers)", build_time, index.map.len());
+        if let Some(w) = &mut csv_writer {
+            write!(w, "{}", res.to_csv_line()).unwrap();
+        }
     }
 }
 
-pub fn run_filter_comparison(db: &Database,top_n: usize, k: usize, mutate: bool, length: usize, sub_rate: f64, indel_rate: f64,sample_num: usize) {
+pub fn run_filter_comparison(
+    db: &Database,top_n: usize, k: usize, mutate: bool, 
+    length: usize, sub_rate: f64, indel_rate: f64,sample_num: usize,
+    csv_path: Option<&Path>
+) {
     println!("\n=== Task 2: Diagonal Filtering vs Voting (k={}) ===", k);
-    
+    let mut csv_writer = create_csv_writer(csv_path);
+    if let Some(w) = &mut csv_writer {
+        writeln!(w, "{}", ExpResult::csv_header()).unwrap();
+    }
     let config = if mutate {
         QueryConfig { length, sub_rate, indel_rate }
     } else {
@@ -91,14 +112,18 @@ pub fn run_filter_comparison(db: &Database,top_n: usize, k: usize, mutate: bool,
         .collect();
     let metrics_a = calculate_metrics(&res_a, &truths, start_a.elapsed().as_millis() as f64);
     
-    ExpResult {
+    let result_a = ExpResult {
         name: "Method A (Voting)".to_string(),
         recall_1: metrics_a.recall_at_1,
         recall_10: metrics_a.recall_at_10,
         mrr: metrics_a.mrr,
         avg_time: metrics_a.avg_time_ms,
         candidates: metrics_a.avg_candidates
-    }.print();
+    };
+    result_a.print();
+    if let Some(w) = &mut csv_writer {
+        write!(w, "{}", result_a.to_csv_line()).unwrap();
+    }
 
     let start_b = Instant::now();
     let res_b: Vec<Vec<(ProteinId, u32)>> = queries.iter().map(|q| {
@@ -107,26 +132,35 @@ pub fn run_filter_comparison(db: &Database,top_n: usize, k: usize, mutate: bool,
     }).collect();
     let metrics_b = calculate_metrics(&res_b, &truths, start_b.elapsed().as_millis() as f64);
 
-    ExpResult {
+    let result_b = ExpResult {
         name: "Method B (Diag)".to_string(),
         recall_1: metrics_b.recall_at_1,
         recall_10: metrics_b.recall_at_10,
         mrr: metrics_b.mrr,
         avg_time: metrics_b.avg_time_ms,
         candidates: metrics_b.avg_candidates
-    }.print();
+    };
+    result_b.print();
+    if let Some(w) = &mut csv_writer {
+        write!(w, "{}", result_b.to_csv_line()).unwrap();
+    }
 }
 
 pub fn run_ungapped_test(
     db: &Database, sample_num: usize, 
     top_n: usize, k: usize, 
     length: usize, sub_rate: f64, 
-    indel_rate: f64,x_drop: usize) {
+    indel_rate: f64,x_drop: usize,
+    csv_path: Option<&Path>
+) {
 
     println!("\n=== Task 3: Ungapped Extension ===");
-
-    let config_sub  = QueryConfig{length:length, sub_rate:sub_rate, indel_rate:0.0};
-    let config_indel = QueryConfig{length:length, sub_rate:0.0, indel_rate:indel_rate};
+    let mut csv_writer = create_csv_writer(csv_path);
+    if let Some(w) = &mut csv_writer {
+        writeln!(w, "Scenario,Recall_1,Recall_10,MRR,Avg_Time_ms,Avg_Candidates").unwrap();
+    }
+    let config_sub  = QueryConfig{length, sub_rate, indel_rate:0.0};
+    let config_indel = QueryConfig{length, sub_rate:0.0, indel_rate};
     
     let index = KmerIndex::build(db, k);
     let scoring = Scoring::default();
@@ -136,16 +170,25 @@ pub fn run_ungapped_test(
 
     print_comparison("Ungapped Extension", &metrics_sub, 
     &metrics_indel, "Sub Only", "Indel only");
+    if let Some(w) = &mut csv_writer {
+        write_metric_csv(w, "Sub Only", &metrics_sub);
+        write_metric_csv(w, "Indel Only", &metrics_indel);
+    }
 }
 
 
-pub fn run_stress_all(db: &Database, sample_num: usize, top_n: usize) {
+pub fn run_stress_all(db: &Database, sample_num: usize, top_n: usize, csv_path: Option<&Path>) {
     println!("\n===============================================================");
     println!("   STRESS TEST: K-mer Tradeoffs & Mutation Robustness");
     println!("===============================================================");
     println!("{:<4} | {:<8} | {:<8} | {:<8} | {:<8} | {:<8}| {:<8} | {:<10}", 
             "K", "Mut_Rate", "R@1", "R@10", "MRR", "Time(ms)", "Cands", "Mem(MB)");
     println!("---------------------------------------------------------------");
+
+    let mut csv_writer = create_csv_writer(csv_path);
+    if let Some(w) = &mut csv_writer {
+        writeln!(w, "K,Mutation_Rate,Recall_1,Recall_10,MRR,Avg_Time_ms,Avg_Candidates,Memory_MB").unwrap();
+    }
 
     let k_values = vec![3, 4, 5, 6, 7, 8];
     let mutation_rates = vec![0.0, 0.10, 0.20, 0.30];
@@ -179,6 +222,10 @@ pub fn run_stress_all(db: &Database, sample_num: usize, top_n: usize) {
 
             println!("{:<4} | {:<8.1} | {:<8.4} | {:<8.4} | {:<8.4} | {:<8.1} | {:<10.2} | {:<10.2}", 
                     k, sub_rate, m.recall_at_1, m.recall_at_10, m.mrr, m.avg_time_ms, m.avg_candidates, mem_mb);
+            if let Some(w) = &mut csv_writer {
+                write!(w, "{},{:.6},{:.6},{:.6},{:.6},{:.2},{:.2},{:.2}\n", 
+                    k, sub_rate, m.recall_at_1, m.recall_at_10, m.mrr, m.avg_time_ms, m.avg_candidates, mem_mb).unwrap();
+            }
     }
     println!("---------------------------------------------------------------");
 }
@@ -190,9 +237,14 @@ pub fn run_indel_test(
     db: &Database, sample_num: usize, 
     top_n: usize, k: usize, 
     length: usize, sub_rate: f64, 
-    indel_rate: f64, x_drop: usize) {
+    indel_rate: f64, x_drop: usize,
+    csv_path: Option<&Path>
+) {
     println!("\n=== Task 5: Indel Robustness & SW Refinement ===");
-
+    let mut csv_writer = create_csv_writer(csv_path);
+    if let Some(w) = &mut csv_writer {
+        writeln!(w, "Scenario,Recall_1,Recall_10,MRR,Avg_Time_ms,Avg_Candidates").unwrap();
+    }
     let config = QueryConfig { length, sub_rate, indel_rate };
     let queries = query_gen::sample_queries(db, sample_num, &config);
     let truths: Vec<ProteinId> = queries.iter().map(|q| q.original_pid).collect();
@@ -243,19 +295,28 @@ pub fn run_indel_test(
     let m_ungapped = calculate_metrics(&res_ungapped, &truths, time_per_query);
     let m_sw = calculate_metrics(&res_sw, &truths, time_per_query); 
 
-    print_comparison("Step 5 Test: Indel Robustness (10% Indels)", &m_ungapped, &m_sw, "Ungapped Only", "Ungapped + SW");
+    print_comparison("Step 5 Test: Indel Robustness (10% Indels)", &m_ungapped, 
+    &m_sw, "Ungapped Only", "Ungapped + SW");
+    if let Some(w) = &mut csv_writer {
+        write_metric_csv(w, "Ungapped Only", &m_ungapped);
+        write_metric_csv(w, "Ungapped + SW", &m_sw);
+    }
 }
 
 
 pub fn run_spaced_seed_test(
     db: &Database, top_n: usize,
     k: usize,pattern: &str,sample_num: usize, 
-    sub_rate: f64, indel_rate: f64,length: usize
+    sub_rate: f64, indel_rate: f64,length: usize,
+    csv_path: Option<&Path>
 ) {
     println!("\n=== Task 6: Spaced Seeds vs Contiguous (High Mutation) ===");
-    
+    let mut csv_writer = create_csv_writer(csv_path);
+    if let Some(w) = &mut csv_writer {
+        writeln!(w, "{}", ExpResult::csv_header()).unwrap();
+    }
     // 30% mutation rate
-    let config = QueryConfig { length: length, sub_rate: sub_rate, indel_rate: indel_rate };
+    let config = QueryConfig { length, sub_rate, indel_rate };
     let queries = query_gen::sample_queries(db, sample_num, &config);
     let truths: Vec<ProteinId> = queries.iter().map(|q| q.original_pid).collect();
 
@@ -277,14 +338,18 @@ pub fn run_spaced_seed_test(
         .collect();
     let m1 = calculate_metrics(&res_1, &truths, start_1.elapsed().as_millis() as f64);
     
-    ExpResult {
+    let result_1 = ExpResult {
         name: "Contiguous (11111)".to_string(),
         recall_1: m1.recall_at_1,
         recall_10: m1.recall_at_10,
         mrr: m1.mrr,
         avg_time: m1.avg_time_ms,
         candidates: m1.avg_candidates
-    }.print();
+    };
+    result_1.print();
+    if let Some(w) = &mut csv_writer {
+        write!(w, "{}", result_1.to_csv_line()).unwrap();
+    }
 
     // --- Run Spaced ---
     let start_2 = Instant::now();
@@ -293,12 +358,16 @@ pub fn run_spaced_seed_test(
         .collect();
     let m2 = calculate_metrics(&res_2, &truths, start_2.elapsed().as_millis() as f64);
 
-    ExpResult {
+    let result_2 = ExpResult {
         name: "Spaced (1101011)".to_string(),
         recall_1: m2.recall_at_1,
         recall_10: m2.recall_at_10,
         mrr: m2.mrr,
         avg_time: m2.avg_time_ms,
         candidates: m2.avg_candidates
-    }.print();
+    };
+    result_2.print();
+    if let Some(w) = &mut csv_writer {
+        write!(w, "{}", result_2.to_csv_line()).unwrap();
+    }
 }

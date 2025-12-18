@@ -95,50 +95,40 @@ unsafe fn extend_right_avx2(
     // 1. SIMD Loop: Process 32 bytes at a time
     while q_curr + 32 <= q_len && t_curr + 32 <= t_len {
         // Load 32 bytes from query and target (Unaligned load is fast on modern CPUs)
-        let v_q = _mm256_loadu_si256(query.as_ptr().add(q_curr) as *const __m256i);
-        let v_t = _mm256_loadu_si256(target.as_ptr().add(t_curr) as *const __m256i);
+        unsafe {
+            let v_q = _mm256_loadu_si256(query.as_ptr().add(q_curr) as *const __m256i);
+            let v_t = _mm256_loadu_si256(target.as_ptr().add(t_curr) as *const __m256i);
 
-        // Compare: result is 0xFF for equal, 0x00 for not equal
-        let v_cmp = _mm256_cmpeq_epi8(v_q, v_t);
+            // Compare: result is 0xFF for equal, 0x00 for not equal
+            let v_cmp = _mm256_cmpeq_epi8(v_q, v_t);
 
-        // Create Mask: Collapses 32 bytes into a 32-bit integer
-        // Bit i is 1 if match, 0 if mismatch
-        let mask = _mm256_movemask_epi8(v_cmp) as u32;
+            // Create Mask: Collapses 32 bytes into a 32-bit integer
+            // Bit i is 1 if match, 0 if mismatch
+            let mask = _mm256_movemask_epi8(v_cmp) as u32;
 
-        // Optimization: Fast Path
-        // Calculate the score change for the entire block
-        let matches = mask.count_ones() as i32;
-        let mismatches = 32 - matches;
-        let block_delta = matches * scoring.match_score + mismatches * scoring.mismatch_score;
+            // --- Bit Iteration (No Memory Access) ---
+            // This loop runs entirely in registers, very fast.
+            let mut temp_mask = mask;
+            for i in 0..32 {
+                // Check lowest bit
+                if (temp_mask & 1) != 0 {
+                    current_score += scoring.match_score;
+                } else {
+                    current_score += scoring.mismatch_score;
+                }
 
-        // "Lookahead" Check:
-        // If adding the whole block doesn't trigger X-drop AND ensures a new best score,
-        // we can skip the bit-by-bit check.
-        // (Note: This is a heuristic. For strict X-drop, we usually iterate bits. 
-        //  Here we iterate bits to be safe and accurate).
-        
-        // --- Bit Iteration (No Memory Access) ---
-        // This loop runs entirely in registers, very fast.
-        let mut temp_mask = mask;
-        for i in 0..32 {
-            // Check lowest bit
-            if (temp_mask & 1) != 0 {
-                current_score += scoring.match_score;
-            } else {
-                current_score += scoring.mismatch_score;
+                if current_score > best_score {
+                    best_score = current_score;
+                    best_q_idx = q_curr + i;
+                    best_t_idx = t_curr + i;
+                } else if current_score < best_score - x_drop {
+                    // Drop detected inside the block!
+                    return (best_score, best_q_idx, best_t_idx);
+                }
+                
+                // Shift to next bit
+                temp_mask >>= 1;
             }
-
-            if current_score > best_score {
-                best_score = current_score;
-                best_q_idx = q_curr + i;
-                best_t_idx = t_curr + i;
-            } else if current_score < best_score - x_drop {
-                // Drop detected inside the block!
-                return (best_score, best_q_idx, best_t_idx);
-            }
-            
-            // Shift to next bit
-            temp_mask >>= 1;
         }
 
         q_curr += 32;
@@ -153,8 +143,8 @@ unsafe fn extend_right_avx2(
         let mut q_i = q_curr;
         let mut t_i = t_curr;
         while q_i < q_len && t_i < t_len {
-            let val_q = *query.get_unchecked(q_i);
-            let val_t = *target.get_unchecked(t_i);
+            let val_q = unsafe { *query.get_unchecked(q_i) };
+            let val_t = unsafe { *target.get_unchecked(t_i) };
 
             if val_q == val_t {
                 current_score += scoring.match_score;

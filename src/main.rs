@@ -33,6 +33,10 @@ enum Commands {
         k: usize,
         #[arg(short, long, default_value_t = 10)]
         n: usize,
+        #[arg(short, long, default_value_t = 10)]
+        x_drop:usize,
+        #[arg(short, long,default_value = "11010111")]
+        pattern: String,
     },
     Bench {
         #[arg(value_enum)] // Takes the enum as a required positional argument
@@ -55,6 +59,8 @@ enum Commands {
         x_drop:usize,
         #[arg(short, long,default_value = "11010111")]
         pattern: String,
+        #[arg(short, long)]
+        csv_path: Option<PathBuf>,
     }
 }
 
@@ -106,7 +112,10 @@ fn main() {
 
 
     match args.command {
-        Commands::Search { query, query_file, mode, k, n } => {
+        Commands::Search { 
+            query, query_file, 
+            mode, k, 
+            n, x_drop, pattern } => {
             // Collect all Queries
             let mut queries = Vec::new();
             
@@ -138,16 +147,16 @@ fn main() {
             println!("Running search for {} queries (Mode: {:?}, k={})...", queries.len(), mode, k);
             
             let start_idx = Instant::now();
-            let index = KmerIndex::build(&db, k); // Basic/Diag/Auto
+            let index = KmerIndex::build(&db, k);
             //  SpacedIndex
             let spaced_index = if mode == SearchMode::Spaced {
-                Some(spaced::SpacedIndex::build(&db, "1101011"))
+                Some(spaced::SpacedIndex::build(&db, &pattern))
             } else {
                 None
             };
             println!("Index built in {:.2?}", start_idx.elapsed());
 
-            // 遍历每个 Query 进行搜索
+
             for (q_id, q_seq) in queries {
                 println!("\n🔍 Query: {} (Length: {})", q_id, q_seq.len());
                 let start_search = Instant::now();
@@ -169,7 +178,10 @@ fn main() {
                     SearchMode::Auto => {
                         let candidates = seed::find_candidate(&index, &q_seq, 2);
                         let scoring = ungapped::Scoring::default();
-                        let ungapped_hits = ungapped::refine_ungapped(&q_seq, &candidates, &db, &scoring, 10, n);
+                        let ungapped_hits = ungapped::refine_ungapped(
+                            &q_seq, &candidates, &db,
+                            &scoring, x_drop as i32, n
+                        );
                         
                         // Smith-Waterman Refinement
                         let mut final_hits = Vec::new();
@@ -206,21 +218,21 @@ fn main() {
         Commands::Bench { 
             task, n, k, 
             mutate, length, sub_rate, 
-            indel_rate, sample_num, x_drop, pattern} => {
+            indel_rate, sample_num, x_drop, pattern, csv_path} => {
             match task {
-                BenchTask::K => experiment::run_k_tradeoff(&db, n, mutate, length, sub_rate, indel_rate, sample_num),
-                BenchTask::Filter => experiment::run_filter_comparison(&db, n, k,mutate, length, sub_rate, indel_rate, sample_num),
-                BenchTask::Ungap => experiment::run_ungapped_test(&db, sample_num, n, k, length, sub_rate, indel_rate, x_drop),
-                BenchTask::Indel => experiment::run_indel_test(&db, sample_num, n, k, length, sub_rate, indel_rate, x_drop),
-                BenchTask::Spaced => experiment::run_spaced_seed_test(&db, n, k, &pattern, sample_num, sub_rate, indel_rate, length),
-                BenchTask::Stress => experiment::run_stress_all(&db, sample_num, n),
+                BenchTask::K => experiment::run_k_tradeoff(&db, n, mutate, length, sub_rate, indel_rate, sample_num, csv_path.as_deref()),
+                BenchTask::Filter => experiment::run_filter_comparison(&db, n, k,mutate, length, sub_rate, indel_rate, sample_num, csv_path.as_deref()),
+                BenchTask::Ungap => experiment::run_ungapped_test(&db, sample_num, n, k, length, sub_rate, indel_rate, x_drop, csv_path.as_deref()),
+                BenchTask::Indel => experiment::run_indel_test(&db, sample_num, n, k, length, sub_rate, indel_rate, x_drop, csv_path.as_deref()),
+                BenchTask::Spaced => experiment::run_spaced_seed_test(&db, n, k, &pattern, sample_num, sub_rate, indel_rate, length, csv_path.as_deref()),
+                BenchTask::Stress => experiment::run_stress_all(&db, sample_num, n, csv_path.as_deref()),
                 BenchTask::All => {
-                    experiment::run_k_tradeoff(&db, n, mutate, length, sub_rate, indel_rate, sample_num);
-                    experiment::run_filter_comparison(&db, n, k, mutate, length, sub_rate, indel_rate, sample_num);
-                    experiment::run_ungapped_test(&db, sample_num, n, k, length, sub_rate, indel_rate, x_drop);
-                    experiment::run_indel_test(&db, sample_num, n, k, length, sub_rate, indel_rate, x_drop);
-                    experiment::run_spaced_seed_test(&db, n, k, &pattern, sample_num, sub_rate, indel_rate, length);
-                    experiment::run_stress_all(&db, sample_num, n);
+                    experiment::run_k_tradeoff(&db, n, mutate, length, sub_rate, indel_rate, sample_num, csv_path.as_deref());
+                    experiment::run_filter_comparison(&db, n, k, mutate, length, sub_rate, indel_rate, sample_num, csv_path.as_deref());
+                    experiment::run_ungapped_test(&db, sample_num, n, k, length, sub_rate, indel_rate, x_drop, csv_path.as_deref());
+                    experiment::run_indel_test(&db, sample_num, n, k, length, sub_rate, indel_rate, x_drop, csv_path.as_deref());
+                    experiment::run_spaced_seed_test(&db, n, k, &pattern, sample_num, sub_rate, indel_rate, length, csv_path.as_deref());
+                    experiment::run_stress_all(&db, sample_num, n, csv_path.as_deref());
                 }
             }
         }

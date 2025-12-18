@@ -19,14 +19,14 @@ pub fn align_sw(
     aligner.local(query, target)
 }
 
+/// Extract a window around a center position, returning a slice reference and offset.
+/// This avoids unnecessary allocations by returning a slice instead of a Vec.
 pub fn extract_window(
     full_seq: &[u8], 
     center_pos: usize, 
     radius: usize
-) -> (Vec<u8>, usize) {
+) -> (&[u8], usize) {
     let start = center_pos.saturating_sub(radius);
-
     let end = std::cmp::min(full_seq.len(), center_pos + radius);
-
-    (full_seq[start..end].to_vec(), start)
+    (&full_seq[start..end], start)
 }

@@ -49,7 +49,10 @@ impl KmerIndex {
     }
 
     pub fn search_basic(&self, query_seq: &[u8], top_n: usize) -> Vec<(ProteinId, u32)> {
-        let mut scores: FxHashMap<ProteinId, u32> = FxHashMap::default();
+        // Pre-allocate HashMap with estimated capacity based on query length
+        let estimated_hits = (query_seq.len().saturating_sub(self.k) + 1).min(1000);
+        let mut scores: FxHashMap<ProteinId, u32> = FxHashMap::with_capacity_and_hasher(estimated_hits, Default::default());
+        
         if query_seq.len() >= self.k {
             for window in query_seq.windows(self.k) {
                 if let Some(encoded) = encode_kmer(window) {
@@ -61,7 +64,11 @@ impl KmerIndex {
                 }
             }
         }
+        
+        // Collect and sort candidates
         let mut candidates: Vec<(ProteinId, u32)> = scores.into_iter().collect();
+        // For small result sets, full sort is fast. For large sets, we could use partial sort
+        // but unstable sort is already very efficient for this use case.
         candidates.sort_unstable_by(|a, b| b.1.cmp(&a.1));
         if candidates.len() > top_n {
             candidates.truncate(top_n);
