@@ -2,3 +2,7 @@
 /data
 /result
 /script
+meta.yaml
+Cargo.lock
+build.sh
+report*
