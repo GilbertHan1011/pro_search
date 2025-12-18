@@ -57,6 +57,8 @@ enum Commands {
         sample_num: usize,
         #[arg(short, long, default_value_t = 10)]
         x_drop:usize,
+        #[arg(short, long,default_value_t = 2)]
+        min_diagonal:usize,
         #[arg(short, long,default_value = "11010111")]
         pattern: String,
         #[arg(short, long)]
@@ -218,17 +220,18 @@ fn main() {
         Commands::Bench { 
             task, n, k, 
             mutate, length, sub_rate, 
-            indel_rate, sample_num, x_drop, pattern, csv_path} => {
+            indel_rate, sample_num, 
+            x_drop, min_diagonal, pattern, csv_path} => {
             match task {
                 BenchTask::K => experiment::run_k_tradeoff(&db, n, mutate, length, sub_rate, indel_rate, sample_num, csv_path.as_deref()),
-                BenchTask::Filter => experiment::run_filter_comparison(&db, n, k,mutate, length, sub_rate, indel_rate, sample_num, csv_path.as_deref()),
+                BenchTask::Filter => experiment::run_filter_comparison(&db, n, k,mutate, length, sub_rate, indel_rate, sample_num, min_diagonal, csv_path.as_deref()),
                 BenchTask::Ungap => experiment::run_ungapped_test(&db, sample_num, n, k, length, sub_rate, indel_rate, x_drop, csv_path.as_deref()),
                 BenchTask::Indel => experiment::run_indel_test(&db, sample_num, n, k, length, sub_rate, indel_rate, x_drop, csv_path.as_deref()),
                 BenchTask::Spaced => experiment::run_spaced_seed_test(&db, n, k, &pattern, sample_num, sub_rate, indel_rate, length, csv_path.as_deref()),
                 BenchTask::Stress => experiment::run_stress_all(&db, sample_num, n, csv_path.as_deref()),
                 BenchTask::All => {
                     experiment::run_k_tradeoff(&db, n, mutate, length, sub_rate, indel_rate, sample_num, csv_path.as_deref());
-                    experiment::run_filter_comparison(&db, n, k, mutate, length, sub_rate, indel_rate, sample_num, csv_path.as_deref());
+                    experiment::run_filter_comparison(&db, n, k, mutate, length, sub_rate, indel_rate, sample_num, min_diagonal, csv_path.as_deref());
                     experiment::run_ungapped_test(&db, sample_num, n, k, length, sub_rate, indel_rate, x_drop, csv_path.as_deref());
                     experiment::run_indel_test(&db, sample_num, n, k, length, sub_rate, indel_rate, x_drop, csv_path.as_deref());
                     experiment::run_spaced_seed_test(&db, n, k, &pattern, sample_num, sub_rate, indel_rate, length, csv_path.as_deref());

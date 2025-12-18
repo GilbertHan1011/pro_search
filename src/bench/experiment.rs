@@ -88,7 +88,8 @@ pub fn run_k_tradeoff(
 
 pub fn run_filter_comparison(
     db: &Database,top_n: usize, k: usize, mutate: bool, 
-    length: usize, sub_rate: f64, indel_rate: f64,sample_num: usize,
+    length: usize, sub_rate: f64, 
+    indel_rate: f64,sample_num: usize,min_diagonal: usize,
     csv_path: Option<&Path>
 ) {
     println!("\n=== Task 2: Diagonal Filtering vs Voting (k={}) ===", k);
@@ -127,7 +128,7 @@ pub fn run_filter_comparison(
 
     let start_b = Instant::now();
     let res_b: Vec<Vec<(ProteinId, u32)>> = queries.iter().map(|q| {
-        let cands = seed::find_candidate(&index, &q.sequence, 2);
+        let cands = seed::find_candidate(&index, &q.sequence, min_diagonal);
         cands.into_iter().take(10).map(|c| (c.id, c.score as u32)).collect()
     }).collect();
     let metrics_b = calculate_metrics(&res_b, &truths, start_b.elapsed().as_millis() as f64);
