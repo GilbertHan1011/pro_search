@@ -119,7 +119,11 @@ fn main() {
             if let Some(q_path) = query_file {
                 match Database::load_from_fasta(&q_path) {
                     Ok(q_db) => {
-                        for (id, seq) in q_db.ids.into_iter().zip(q_db.sequences.into_iter()) {
+                        for (i, id) in q_db.ids.into_iter().enumerate() {
+                            let start = q_db.offsets[i];
+                            let end = q_db.offsets[i+1];
+                            
+                            let seq = q_db.data[start..end].to_vec();
                             queries.push((id, seq));
                         }
                     },
@@ -134,7 +138,7 @@ fn main() {
             println!("Running search for {} queries (Mode: {:?}, k={})...", queries.len(), mode, k);
             
             let start_idx = Instant::now();
-            let index = KmerIndex::build(&db, k); // Basic/Diag/Auto 需要普通索引
+            let index = KmerIndex::build(&db, k); // Basic/Diag/Auto
             //  SpacedIndex
             let spaced_index = if mode == SearchMode::Spaced {
                 Some(spaced::SpacedIndex::build(&db, "1101011"))

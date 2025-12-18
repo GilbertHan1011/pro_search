@@ -21,25 +21,28 @@ impl KmerIndex {
         }
     }
     pub fn build(db: &Database, k: usize) -> Self {
-        let estimated_capacity = db.sequences.len() * 100;
+        let estimated_capacity = db.len() * 100;
         let mut map: FxHashMap<u64, PostingsList> = FxHashMap::with_capacity_and_hasher(estimated_capacity, Default::default());
         println!("Building index with k={} for {} proteins...", k, db.len());
-        for (prot_id, seq) in db.sequences.iter().enumerate() {
-            let pid = prot_id as ProteinId;
+        for i in 0..db.len() {
+            let pid = i as ProteinId;
+            let start = db.offsets[i];
+            let end = db.offsets[i+1];
+            let seq = &db.data[start..end];
             if seq.len() < k {
                 continue;
             }
+
             for (pos, window) in seq.windows(k).enumerate() {
                 if let Some(encoded) = encode_kmer(window) {
                     map.entry(encoded)
-                    .or_default()
-                    .push((pid, pos as Position));
+                        .or_default()
+                        .push((pid, pos as Position));
                 }
             }
         }
         println!("Index built! Total unique k-mers: {}", map.len());
         KmerIndex { map, k }
-
     }
     pub fn query(&self, encoded_kmer: u64) -> Option<&PostingsList> {
         self.map.get(&encoded_kmer)

@@ -1,6 +1,7 @@
 use crate::core::database::Database;
 use crate::index::kmer::ProteinId;
 use crate::filter::seed::Candidate;
+use crate::align::simd;
 
 #[derive(Debug, Clone)]
 pub struct ExtensionResult {
@@ -23,52 +24,6 @@ impl Scoring {
     }
 }
 
-fn extend_direction(
-    query: &[u8],
-    target: &[u8],
-    scoring: &Scoring,
-    q_start: usize,
-    t_start: usize,
-    step: isize,
-    x_drop: i32,
-) -> (i32, usize, usize) {
-    let mut best_score = 0;
-    let mut current_score = 0;
-    let mut best_q_idx = q_start;
-    let mut best_t_idx = t_start;
-
-    let mut q_idx = q_start as isize;
-    let mut t_idx = t_start as isize;
-
-    loop {
-        if q_idx < 0 || t_idx < 0 || q_idx as usize >= query.len()|| t_idx as usize >= target.len() {
-            break;
-        }
-
-        let q_char = query[q_idx as usize];
-        let t_char = target[t_idx as usize];
-
-        if q_char == t_char {
-            current_score += scoring.match_score;
-        } else {
-            current_score += scoring.mismatch_score;
-        }
-        
-        if current_score > best_score {
-            best_score = current_score;
-            best_q_idx = q_idx as usize;
-            best_t_idx = t_idx as usize;
-        } else if current_score < best_score - x_drop {
-            break;
-        }
-
-        q_idx += step;
-        t_idx += step;
-    }
-
-    (best_score, best_q_idx, best_t_idx)
-}
-
 pub fn extend_ungapped(
     query: &[u8],
     target: &[u8],
@@ -77,15 +32,15 @@ pub fn extend_ungapped(
     t_start: usize,
     x_drop: i32,
 ) -> ExtensionResult {
-    let (right_score, right_q_end, right_t_end) = extend_direction(query, target, 
-        scoring, q_start, 
-        t_start, 1, 
-        x_drop);
+    let (right_score, right_q_end, right_t_end) = simd::extend_direction_simd(
+        query, target, scoring, 
+        q_start, t_start, 1, x_drop
+    );
     let (left_score, left_q_start, left_t_start) = if q_start > 0 && t_start > 0 {
-        extend_direction(query, target, 
-        scoring, q_start -1,  // avoid double counting
-        t_start -1, -1, 
-        x_drop)
+        simd::extend_direction_simd(
+            query, target, scoring, 
+            q_start - 1, t_start - 1, -1, x_drop
+        )
     } else {
         (0, q_start, t_start)
     };

@@ -19,7 +19,11 @@ impl SpacedIndex {
         let mut map: FxHashMap<u64, Vec<(ProteinId, Position)>> = FxHashMap::default();
 
         println!("Building Spaced Index (Pattern: {}, Weight: {}, Span: {})...", pattern, weight, span);
-        for (pid, seq) in db.sequences.iter().enumerate() {
+        for i in 0..db.len() {
+            let pid = i as ProteinId;
+            let start = db.offsets[i];
+            let end = db.offsets[i+1];
+            let seq = &db.data[start..end];
             if seq.len() < span {
                 continue;
             }

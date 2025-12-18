@@ -8,7 +8,8 @@ use zstd::stream::read::Decoder as ZstdDecoder; // zstd decoder
 
 pub struct Database {
     pub ids: Vec<String>,
-    pub sequences: Vec<Vec<u8>>,
+    pub data: Vec<u8>,        
+    pub offsets: Vec<usize>,  // Flattened offsets for quick access
 }
 
 impl Database {
@@ -31,10 +32,10 @@ impl Database {
         };
         let reader = BufReader::new(reader);
         let mut ids = Vec::new();
-        let mut sequences = Vec::new();
+        let mut data = Vec::with_capacity(100 * 1024 * 1024); 
+        let mut offsets = vec![0];
 
         let mut current_id = String::new();
-        let mut current_sequence = Vec::new();
         let mut in_record = false;
         for line_res in reader.lines() {
             let line = line_res.context("Fail to read line")?;
@@ -44,28 +45,27 @@ impl Database {
             }
             if line.starts_with(">") {
                 if in_record {
-                    if current_id.is_empty() {
-                        current_id= format!("unknown_{}", ids.len());
-                    }
                     ids.push(current_id);
-                    sequences.push(current_sequence);
+                    offsets.push(data.len());
                 }
-                current_id = line[1..].to_string();
-                current_sequence = Vec::new();
+            
+                current_id = line[1..].split_whitespace().next().unwrap_or("unknown").to_string();
+                
                 in_record = true;
         } else{
-            current_sequence.extend_from_slice(line.as_bytes());
+            data.extend_from_slice(line.as_bytes());
         }
     }
-    if in_record && !current_sequence.is_empty() {
+    if in_record {
         ids.push(current_id);
-        sequences.push(current_sequence);
+        offsets.push(data.len());
     }
     println!("Loaded {} proteins from {:?}", ids.len(), path);
         
         Ok(Database {
             ids,
-            sequences,
+            data,
+            offsets,
         })
     }
     pub fn len(&self) -> usize {
@@ -77,7 +77,9 @@ impl Database {
     }
     pub fn get(&self, index: usize) -> Option<(&str, &[u8])> {
         if index < self.ids.len() {
-            Some((&self.ids[index], &self.sequences[index]))
+            let start = self.offsets[index];
+            let end = self.offsets[index + 1];
+            Some((&self.ids[index], &self.data[start..end]))
         } else {
             None
         }
